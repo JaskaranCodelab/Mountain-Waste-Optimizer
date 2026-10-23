@@ -39,7 +39,18 @@ Open the printed local URL (default `http://localhost:5173`).
 
 Corporate/guest Wi-Fi may enable client isolation, which blocks device-to-device access. Many Android phone hotspots also isolate their clients, so connected devices get IP addresses but still cannot reach each other. In that case use a normal Wi-Fi router, not a phone hotspot. The LAN address changes whenever the network changes, so always use the current Wi-Fi adapter IP.
 
-`npm run dev` starts both Vite and the shared tracking API. When both devices open the same laptop-hosted Network URL, they share that API automatically. If frontends are hosted on different computers, run one shared tracking API and set `VITE_TRACKING_API_URL` on every frontend to that server (see `.env.example`); use `npm run dev:frontend` for a frontend that connects to an already-running shared API. Allow inbound TCP 8787 to the API host for this separate-frontend setup. The dashboard receives driver coordinates through a server-sent event stream. Plain HTTP on a LAN can synchronize simulated positions, but browsers usually block live GPS there; serve the app over HTTPS and allow location access on the driver's device for accurate GPS. The development tracking service is a local demo service, not production-secure fleet infrastructure.
+`npm run dev` starts both Vite and the shared tracking API. When both devices open the same laptop-hosted Network URL, they share that API automatically. If frontends are hosted on different computers, run one shared tracking API and set `VITE_TRACKING_API_URL` on every frontend to that server (see `.env.example`); use `npm run dev:frontend` for a frontend that connects to an already-running shared API. Allow inbound TCP 8787 to the API host for this separate-frontend setup. Dashboard pages refresh shared driver coordinates from the tracking API every 1.5 seconds. Plain HTTP on a LAN can synchronize simulated positions, but browsers usually block live GPS there; serve the app over HTTPS and allow location access on the driver's device for accurate GPS. The development tracking service is a local demo service, not production-secure fleet infrastructure.
+
+### Shared live tracking on Vercel
+
+Vercel deploys the frontend and `/api/tracking` function. To share locations between every Vercel deployment/device, connect one Upstash Redis database to the Vercel project from **Storage → Marketplace**, then make sure these environment variables are available to the deployment:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+Redeploy after adding the database/variables. Leave `VITE_TRACKING_API_URL` unset in Vercel so every page calls the same-origin `/api/tracking` function. Driver locations are shared through Redis, refreshed by dashboard clients every 1.5 seconds, and removed from the active map when the driver ends the route or stops sending updates for 90 seconds. Pickup statuses and issue notes are shared through Redis and refreshed every 2.5 seconds, so driver updates appear in admin sessions on other devices. Keep the driver page open during navigation. Browser GPS requires HTTPS and location permission; simulated positions also synchronize through the same service.
+
+Without the Redis variables, the Vercel API responds as offline and devices cannot share locations. The driver's current sign-in is a demo UI, not production authentication; secure driver accounts should be added before using this endpoint for an operational fleet.
 
 ### Production build
 

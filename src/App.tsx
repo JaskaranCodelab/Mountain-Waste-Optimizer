@@ -11,6 +11,8 @@ import { PickupStopsPage } from './pages/PickupStopsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DriverPortal } from './pages/DriverPortal';
+import { PortalHomePage, type PortalChoice } from './pages/PortalHomePage';
+import { PortalLoginPage, type PortalIdentity } from './pages/PortalLoginPage';
 
 function CurrentPage() {
   const { view } = useApp();
@@ -34,14 +36,46 @@ function CurrentPage() {
 }
 
 function AppShell() {
-  const { view } = useApp();
+  const { view, setView } = useApp();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [driverOpen, setDriverOpen] = useState(false);
+  const [screen, setScreen] = useState<'home' | 'admin-login' | 'driver-login' | 'admin' | 'driver'>('home');
+  const [identity, setIdentity] = useState<PortalIdentity | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setSidebarOpen(false);
-  }, [view]);
+  }, [view, screen]);
+
+  function choosePortal(portal: PortalChoice) {
+    setScreen(portal === 'admin' ? 'admin-login' : 'driver-login');
+  }
+
+  function login(nextIdentity: PortalIdentity) {
+    setIdentity(nextIdentity);
+    if (nextIdentity.role === 'admin') {
+      setView('overview');
+      setScreen('admin');
+    } else {
+      setScreen('driver');
+    }
+  }
+
+  function logout() {
+    setIdentity(null);
+    setView('overview');
+    setScreen('home');
+  }
+
+  if (screen === 'home') return <PortalHomePage onChoose={choosePortal} />;
+  if (screen === 'admin-login' || screen === 'driver-login') {
+    return <PortalLoginPage portal={screen === 'admin-login' ? 'admin' : 'driver'} onBack={() => setScreen('home')} onLogin={login} />;
+  }
+  if (screen === 'driver' && identity?.role === 'driver') {
+    return <><DriverPortal driverId={identity.id} onLogout={logout} /><Toast /></>;
+  }
+  if (screen !== 'admin' || identity?.role !== 'admin') {
+    return <PortalHomePage onChoose={choosePortal} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-100/70">
@@ -55,7 +89,7 @@ function AppShell() {
       ) : null}
 
       <div className="flex min-h-screen flex-col lg:pl-[272px]">
-        <Topbar onMenu={() => setSidebarOpen(true)} onDriverLogin={() => setDriverOpen(true)} />
+        <Topbar onMenu={() => setSidebarOpen(true)} onLogout={logout} />
         <main className="flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto w-full max-w-[1500px]">
             <CurrentPage />
@@ -79,7 +113,6 @@ function AppShell() {
       </div>
 
       <Toast />
-      <DriverPortal open={driverOpen} onClose={() => setDriverOpen(false)} />
     </div>
   );
 }

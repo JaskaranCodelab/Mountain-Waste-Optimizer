@@ -47,6 +47,7 @@ import {
 const STORAGE_KEY = 'himalaya-route-state-v5';
 const TRACKING_API_BASE = (import.meta.env.VITE_TRACKING_API_URL ?? '').replace(/\/+$/, '');
 const trackingApiUrl = (path: string) => `${TRACKING_API_BASE}${path}`;
+const WASTE_MODES: WasteType[] = ['household', 'pine', 'fruit'];
 
 interface PersistedState {
   version: number;
@@ -70,6 +71,7 @@ export interface Notice {
 }
 
 export interface DriverTracking {
+  trackingKey: string;
   truckId: string;
   truckName: string;
   position: LatLng;
@@ -80,9 +82,12 @@ export interface DriverTracking {
   updatedAt?: number;
 }
 
-function publishTrackingUpdate(tracking: DriverTracking | null, method: 'POST' | 'DELETE') {
-  const body = method === 'POST' && tracking ? JSON.stringify(tracking) : undefined;
-  void fetch(trackingApiUrl('/api/tracking'), {
+function publishTrackingUpdate(tracking: DriverTracking, method: 'POST' | 'DELETE') {
+  const body = method === 'POST' ? JSON.stringify(tracking) : undefined;
+  const url = method === 'DELETE'
+    ? trackingApiUrl(`/api/tracking?id=${encodeURIComponent(tracking.trackingKey)}`)
+    : trackingApiUrl('/api/tracking');
+  void fetch(url, {
     method,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body,
@@ -102,6 +107,7 @@ interface AppContextValue {
   selectedStopId: string | null;
   selectStop: (id: string | null) => void;
   updateStops: (updater: Stop[] | ((prev: Stop[]) => Stop[])) => void;
+  updatePickupStatus: (stopId: string, status: StopStatus, note?: string) => void;
   upsertStop: (stop: Stop) => void;
   removeStop: (id: string) => void;
   resetDemoData: () => void;
@@ -118,7 +124,8 @@ interface AppContextValue {
   optimizeRoute: () => void;
   optimizeRouteForStops: (stopIds: string[]) => void;
   driverTracking: DriverTracking | null;
-  startDriverTracking: (truckName: string, position: LatLng, simulated: boolean) => string;
+  driverTrackings: DriverTracking[];
+  startDriverTracking: (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string) => string;
   updateDriverTracking: (position: LatLng, progress: number, simulated: boolean, accuracyMeters?: number) => void;
   stopDriverTracking: () => void;
   trackingConnected: boolean;
@@ -338,6 +345,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [routeScopeIds, setRouteScopeIds] = useState<string[] | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [driverTracking, setDriverTracking] = useState<DriverTracking | null>(null);
+  const [driverTrackings, setDriverTrackings] = useState<DriverTracking[]>([]);
   const driverTrackingRef = useRef<DriverTracking | null>(driverTracking);
   const [trackingConnected, setTrackingConnected] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -368,6 +376,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [wasteMode],
   );
 
+  const updatePickupStatus = useCallback((stopId: string, status: StopStatus, note?: string) => {
+    const stop = stopSets[wasteMode].find((item) => item.id === stopId);
+    const nextNote = note ?? stop?.note ?? '';
+    updateStops((previous) => previous.map((item) => item.id === stopId
+      ? { ...item, status, note: nextNote }
+      : item));
+    void fetch(trackingApiUrl('/api/pickup-status'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ wasteMode, stopId, status, note: nextNote }),
+    }).catch(() => undefined);
+  }, [stopSets, wasteMode, updateStops]);
+
   const notify = useCallback(
     (message: string, tone: Notice['tone'] = 'info') => {
       setNotice({ id: Date.now(), message, tone });
@@ -386,18 +407,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [notice]);
 
   useEffect(() => {
-    const events = new EventSource(trackingApiUrl('/api/tracking/events'));
-    events.onopen = () => setTrackingConnected(true);
-    events.onerror = () => setTrackingConnected(false);
-    events.onmessage = (event) => {
+    let active = true;
+    const refresh = async () => {
       try {
-        const update = JSON.parse(event.data) as DriverTracking | null;
-        setDriverTracking(update);
+        const response = await fetch(trackingApiUrl('/api/tracking'), { cache: 'no-store' });
+        if (!response.ok) throw new Error('Shared tracking API is unavailable.');
+        const result = await response.json() as { trucks?: DriverTracking[] };
+        if (!active) return;
+        const trucks = Array.isArray(result.trucks) ? result.trucks : [];
+        setDriverTrackings(trucks);
+        const ownTracking = driverTrackingRef.current;
+        if (ownTracking) {
+          const latest = trucks.find((truck) => truck.trackingKey === ownTracking.trackingKey);
+          if (latest) setDriverTracking(latest);
+        }
+        setTrackingConnected(true);
+      } catch {
+        if (active) setTrackingConnected(false);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshPickupStatuses = async () => {
+      try {
+        const response = await fetch(trackingApiUrl('/api/pickup-status'), { cache: 'no-store' });
+        if (!response.ok) return;
+        const result = await response.json() as { statuses?: Record<string, unknown> };
+        if (!active || !result.statuses) return;
+        const remoteByMode = new Map<WasteType, Map<string, { status: StopStatus; note?: string }>>();
+        WASTE_MODES.forEach((mode) => {
+          const raw = result.statuses?.[mode];
+          const records = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
+          const remoteStops = new Map<string, { status: StopStatus; note?: string }>();
+          records.forEach((record) => {
+            if (!record || typeof record !== 'object') return;
+            const item = record as { id?: unknown; status?: unknown; note?: unknown };
+            if (typeof item.id === 'string' && ['Pending', 'In Progress', 'Completed'].includes(String(item.status))) {
+              remoteStops.set(item.id, { status: item.status as StopStatus, note: typeof item.note === 'string' ? item.note : undefined });
+            }
+          });
+          remoteByMode.set(mode, remoteStops);
+        });
+        setStopSets((previous) => {
+          let changed = false;
+          const next = { ...previous };
+          WASTE_MODES.forEach((mode) => {
+            const remoteStops = remoteByMode.get(mode);
+            if (!remoteStops?.size) return;
+            next[mode] = previous[mode].map((stop) => {
+              const remote = remoteStops.get(stop.id);
+              if (!remote || (stop.status === remote.status && (remote.note === undefined || stop.note === remote.note))) return stop;
+              changed = true;
+              return { ...stop, status: remote.status, ...(remote.note === undefined ? {} : { note: remote.note }) };
+            });
+          });
+          return changed ? next : previous;
+        });
       } catch {
         return;
       }
     };
-    return () => events.close();
+    void refreshPickupStatuses();
+    const timer = window.setInterval(() => void refreshPickupStatuses(), 2500);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   useEffect(() => {
@@ -733,6 +810,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     simulationStatus,
     activePlan,
     updateStops,
+    updatePickupStatus,
   ]);
 
   const totalWasteKg = useMemo(
@@ -1019,20 +1097,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const startDriverTracking = useCallback(
-    (truckName: string, position: LatLng, simulated: boolean) => {
-      const activeIds = new Set(fleet.map((truck) => truck.id));
-      if (driverTracking) activeIds.add(driverTracking.truckId);
+    (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string) => {
+      const activeIds = new Set([
+        ...fleet.map((truck) => truck.id),
+        ...driverTrackings.map((truck) => truck.truckId),
+      ]);
       let sequence = 1;
       while (activeIds.has(`TRK-${String(sequence).padStart(2, '0')}`)) sequence += 1;
-      const truckId = `TRK-${String(sequence).padStart(2, '0')}`;
-      const tracking = { truckId, truckName, position, progress: 0, simulated, startedAt: Date.now() };
+      const truckId = assignedTruckId ?? `TRK-${String(sequence).padStart(2, '0')}`;
+      const trackingKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const tracking = { trackingKey, truckId, truckName, position, progress: 0, simulated, startedAt: Date.now() };
       driverTrackingRef.current = tracking;
       setDriverTracking(tracking);
+      setDriverTrackings((previous) => [...previous.filter((truck) => truck.trackingKey !== trackingKey), tracking]);
       publishTrackingUpdate(tracking, 'POST');
       notify(`${truckId} navigation started. Live dashboard tracking is active.`, 'success');
       return truckId;
     },
-    [fleet, driverTracking, notify],
+    [fleet, driverTrackings, notify],
   );
   const updateDriverTracking = useCallback(
     (position: LatLng, nextProgress: number, simulated: boolean, accuracyMeters?: number) => {
@@ -1048,14 +1130,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       driverTrackingRef.current = tracking;
       setDriverTracking(tracking);
+      setDriverTrackings((previous) => previous.map((truck) => truck.trackingKey === tracking.trackingKey ? tracking : truck));
       publishTrackingUpdate(tracking, 'POST');
     },
     [],
   );
   const stopDriverTracking = useCallback(() => {
+    const current = driverTrackingRef.current;
+    if (current) {
+      publishTrackingUpdate(current, 'DELETE');
+      setDriverTrackings((previous) => previous.filter((truck) => truck.trackingKey !== current.trackingKey));
+    }
     driverTrackingRef.current = null;
     setDriverTracking(null);
-    publishTrackingUpdate(null, 'DELETE');
   }, []);
 
   const setActivePlanId = useCallback((id: RoutePlanId) => {
@@ -1199,6 +1286,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     selectedStopId,
     selectStop,
     updateStops,
+    updatePickupStatus,
     upsertStop,
     removeStop,
     resetDemoData,
@@ -1217,6 +1305,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     optimizeRoute,
     optimizeRouteForStops,
     driverTracking,
+    driverTrackings,
     startDriverTracking,
     updateDriverTracking,
     stopDriverTracking,

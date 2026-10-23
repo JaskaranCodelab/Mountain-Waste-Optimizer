@@ -7,7 +7,7 @@ import {
   PauseCircle,
   PlayCircle,
   Truck,
-  LogIn,
+  LogOut,
 } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import type { ViewId } from '../types';
@@ -61,8 +61,8 @@ function formatClock(date: Date): { dateLabel: string; timeLabel: string } {
   return { dateLabel, timeLabel };
 }
 
-export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriverLogin: () => void }) {
-  const { view, simulationStatus, routing, fleet, driverTracking } = useApp();
+export function Topbar({ onMenu, onLogout }: { onMenu: () => void; onLogout: () => void }) {
+  const { view, simulationStatus, routing, fleet, driverTrackings } = useApp();
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -72,6 +72,7 @@ export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriver
 
   const meta = PAGE_META[view];
   const clock = formatClock(now);
+  const activeTruckCount = new Set([...fleet.map((truck) => truck.id), ...driverTrackings.map((truck) => truck.truckId)]).size;
 
   const simLabel =
     simulationStatus === 'running'
@@ -125,8 +126,8 @@ export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriver
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" onClick={onDriverLogin} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-forest-700 px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-forest-800 sm:px-3.5 sm:text-xs">
-            <LogIn className="h-3.5 w-3.5" /> Driver Login
+          <button type="button" onClick={onLogout} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-forest-700 px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-forest-800 sm:px-3.5 sm:text-xs">
+            <LogOut className="h-3.5 w-3.5" /> Logout
           </button>
           <div className="hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 xl:flex">
             <MapPin className="h-3.5 w-3.5 text-forest-600" />
@@ -138,7 +139,7 @@ export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriver
 
           <div className="hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 md:flex">
             <Truck className="h-3.5 w-3.5 text-forest-600" />
-            {fleet.length + (driverTracking ? 1 : 0)} trucks • Active
+            {activeTruckCount} trucks • Active
             <span
               className={cn(
                 'ml-0.5 h-1.5 w-1.5 rounded-full',
