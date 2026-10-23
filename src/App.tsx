@@ -79,7 +79,7 @@ function AppShell() {
       </div>
 
       <Toast />
-      {driverOpen ? <DriverPortal onClose={() => setDriverOpen(false)} /> : null}
+      <DriverPortal open={driverOpen} onClose={() => setDriverOpen(false)} />
     </div>
   );
 }

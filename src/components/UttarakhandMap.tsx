@@ -193,6 +193,14 @@ function MapAutoResize() {
   return null;
 }
 
+function DriverMapFollow({ position }: { position: LatLng | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (position) map.panTo([position.lat, position.lng], { animate: true, duration: 0.45 });
+  }, [position?.lat, position?.lng, map]);
+  return null;
+}
+
 function statusTone(status: Stop['status']): BadgeTone {
   if (status === 'Completed') {
     return 'green';
@@ -241,6 +249,7 @@ export function UttarakhandMap({
     settings,
     completedCount,
     notify,
+    driverTracking,
   } = useApp();
   const visibleStops = useMemo(
     () => (stopIds ? stops.filter((stop) => stopIds.includes(stop.id)) : stops),
@@ -335,6 +344,7 @@ export function UttarakhandMap({
       return [];
     }
     return fleet
+      .filter((truck) => truck.id !== driverTracking?.truckId)
       .filter((truck) => (planId ? truck.planId === planId : true))
       .flatMap((truck) => {
         const plan = plans[truck.planId];
@@ -373,7 +383,7 @@ export function UttarakhandMap({
           },
         ];
       });
-  }, [fleet, planId, plans, showTruck, stops]);
+  }, [fleet, planId, plans, showTruck, stops, driverTracking?.truckId]);
 
   const truckIcons = useMemo(() => {
     const icons = new Map<string, L.DivIcon>();
@@ -431,6 +441,7 @@ export function UttarakhandMap({
           selected={selectedStop}
         />
         <MapAutoResize />
+        {driverTracking ? <DriverMapFollow position={driverTracking.position} /> : null}
 
         {showBaseline && otherPlan ? (
           <Polyline
@@ -705,6 +716,25 @@ export function UttarakhandMap({
             </Marker>
           );
         })}
+
+        {driverTracking ? (
+          <Marker
+            key={`driver-live-${driverTracking.truckId}`}
+            position={[driverTracking.position.lat, driverTracking.position.lng]}
+            icon={fleetTruckIcon(driverTracking.truckId, '#16a34a', 500)}
+            zIndexOffset={1800}
+          >
+            <Popup>
+              <div className="space-y-1.5">
+                <p className="font-display text-[13px] font-bold text-slate-900">{driverTracking.truckName}</p>
+                <p className="text-[10px] font-semibold text-forest-700">{driverTracking.truckId} · Driver navigation active</p>
+                <p className="text-[10px] text-slate-500">{driverTracking.simulated ? 'Simulated GPS location' : 'Live device GPS location'}</p>
+                {!driverTracking.simulated && driverTracking.accuracyMeters !== undefined ? <p className="text-[10px] text-slate-500">Reported accuracy: ±{Math.round(driverTracking.accuracyMeters)} m</p> : null}
+                <p className="font-mono text-[9px] text-slate-400">{driverTracking.position.lat.toFixed(5)}, {driverTracking.position.lng.toFixed(5)}</p>
+              </div>
+            </Popup>
+          </Marker>
+        ) : null}
 
         {userLocation ? (
           <Marker position={[userLocation.lat, userLocation.lng]} icon={USER_ICON}>

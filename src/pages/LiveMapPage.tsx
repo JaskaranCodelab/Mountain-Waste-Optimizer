@@ -21,7 +21,7 @@ export function LiveMapPage() {
       <SectionHeader
         eyebrow="Live map"
         title="Simulated fleet movement around Mussoorie"
-        subtitle="Two demo trucks follow the baseline and optimized collection routes. Click a truck to inspect its status and select its route. Positions are browser animations, not live GPS."
+        subtitle="Demo fleet trucks follow estimated routes. A driver truck can share live device GPS through the tracking server; simulated location is labeled on the map."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={routing.source === 'osrm' ? 'blue' : 'amber'}>
@@ -84,8 +84,7 @@ export function LiveMapPage() {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-2 text-[9px] text-slate-400">
               <span>
-                Trucks and progress are a browser simulation — not live GPS or
-                fleet telemetry.
+                Driver location is live when device GPS is permitted; other fleet movement is simulated.
               </span>
               <span>Map tiles © OpenStreetMap contributors</span>
             </div>

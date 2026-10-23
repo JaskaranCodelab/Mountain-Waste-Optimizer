@@ -11,7 +11,7 @@ An interactive React dashboard that simulates 10 municipal waste pickups across 
 This is a demo application, not a live municipal service.
 
 - All pickup stops, quantities, priorities and statuses are **simulated demo records**.
-- Truck movement, progress, ETAs and telemetry are a **browser animation**, not live GPS or fleet tracking.
+- The seeded fleet is simulated. A driver truck can publish device GPS to the shared tracking service; GPS requires browser permission and a secure HTTPS page. Without GPS, the driver route is clearly marked simulated.
 - No live traffic, fuel-price or government collection feeds are connected.
 - The route optimizer is a **transparent heuristic**, not a trained machine-learning model.
 - Road geometry comes from public OpenStreetMap routing services where available (Valhalla first, OSRM fallback). If both are unavailable or rate-limited, the app falls back to clearly-labelled **simulated geometry**.
@@ -33,11 +33,13 @@ Open the printed local URL (default `http://localhost:5173`).
 `localhost` only works on the computer running the server. From a phone or another computer:
 
 1. Keep both devices on the same Wi-Fi/LAN.
-2. Run `npm run dev -- --host 0.0.0.0` and use the **Network** URL printed by Vite, for example `http://172.168.11.21:5173`.
+2. Run `npm run dev` and use the **Network** URL printed by Vite, for example `http://192.168.1.20:5173`.
 3. Use the current IP of the active Wi-Fi adapter. Check it with `ipconfig`; the address changes when the network changes.
 4. If it still does not connect, allow inbound TCP 5173 (and 4173 for `npm run preview`) in Windows Firewall. The dev server binds to all interfaces by default.
 
 Corporate/guest Wi-Fi may enable client isolation, which blocks device-to-device access. Many Android phone hotspots also isolate their clients, so connected devices get IP addresses but still cannot reach each other. In that case use a normal Wi-Fi router, not a phone hotspot. The LAN address changes whenever the network changes, so always use the current Wi-Fi adapter IP.
+
+`npm run dev` starts both Vite and the shared tracking API. When both devices open the same laptop-hosted Network URL, they share that API automatically. If frontends are hosted on different computers, run one shared tracking API and set `VITE_TRACKING_API_URL` on every frontend to that server (see `.env.example`); use `npm run dev:frontend` for a frontend that connects to an already-running shared API. Allow inbound TCP 8787 to the API host for this separate-frontend setup. The dashboard receives driver coordinates through a server-sent event stream. Plain HTTP on a LAN can synchronize simulated positions, but browsers usually block live GPS there; serve the app over HTTPS and allow location access on the driver's device for accurate GPS. The development tracking service is a local demo service, not production-secure fleet infrastructure.
 
 ### Production build
 

@@ -45,6 +45,8 @@ import {
 } from '../lib/routingService';
 
 const STORAGE_KEY = 'himalaya-route-state-v5';
+const TRACKING_API_BASE = (import.meta.env.VITE_TRACKING_API_URL ?? '').replace(/\/+$/, '');
+const trackingApiUrl = (path: string) => `${TRACKING_API_BASE}${path}`;
 
 interface PersistedState {
   version: number;
@@ -65,6 +67,27 @@ export interface Notice {
   id: number;
   message: string;
   tone: 'success' | 'info' | 'error';
+}
+
+export interface DriverTracking {
+  truckId: string;
+  truckName: string;
+  position: LatLng;
+  progress: number;
+  simulated: boolean;
+  startedAt: number;
+  accuracyMeters?: number;
+  updatedAt?: number;
+}
+
+function publishTrackingUpdate(tracking: DriverTracking | null, method: 'POST' | 'DELETE') {
+  const body = method === 'POST' && tracking ? JSON.stringify(tracking) : undefined;
+  void fetch(trackingApiUrl('/api/tracking'), {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body,
+    keepalive: method === 'DELETE',
+  }).catch(() => undefined);
 }
 
 interface AppContextValue {
@@ -94,6 +117,11 @@ interface AppContextValue {
   retryRouting: () => void;
   optimizeRoute: () => void;
   optimizeRouteForStops: (stopIds: string[]) => void;
+  driverTracking: DriverTracking | null;
+  startDriverTracking: (truckName: string, position: LatLng, simulated: boolean) => string;
+  updateDriverTracking: (position: LatLng, progress: number, simulated: boolean, accuracyMeters?: number) => void;
+  stopDriverTracking: () => void;
+  trackingConnected: boolean;
   simulationStatus: SimulationStatus;
   progress: number;
   fleet: import('../types').FleetTruck[];
@@ -309,6 +337,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [optimizeVersion, setOptimizeVersion] = useState(0);
   const [routeScopeIds, setRouteScopeIds] = useState<string[] | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
+  const [driverTracking, setDriverTracking] = useState<DriverTracking | null>(null);
+  const driverTrackingRef = useRef<DriverTracking | null>(driverTracking);
+  const [trackingConnected, setTrackingConnected] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [userLocation, setUserLocation] = useState<LatLng | null>(null);
   const [geoStatus, setGeoStatus] = useState<GeoStatus>('idle');
@@ -353,6 +384,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    const events = new EventSource(trackingApiUrl('/api/tracking/events'));
+    events.onopen = () => setTrackingConnected(true);
+    events.onerror = () => setTrackingConnected(false);
+    events.onmessage = (event) => {
+      try {
+        const update = JSON.parse(event.data) as DriverTracking | null;
+        setDriverTracking(update);
+      } catch {
+        return;
+      }
+    };
+    return () => events.close();
+  }, []);
+
+  useEffect(() => {
+    driverTrackingRef.current = driverTracking;
+  }, [driverTracking]);
 
   useEffect(() => {
     const payload: PersistedState = {
@@ -484,12 +534,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const stepScale = Math.max(settings.simulationStepPct, 0.02) / 0.06;
     const timer = window.setInterval(() => {
       setFleet((prev) =>
-        prev.map((truck) => {
-          let next = truck.progress + (truck.speedPct * stepScale) / 100;
-          if (next >= 1) {
-            next = Math.random() * 0.15;
-          }
-          return { ...truck, progress: Math.min(1, Math.max(0, next)) };
+        prev.flatMap((truck) => {
+          const next = truck.progress + (truck.speedPct * stepScale) / 100;
+          if (next >= 1) return [];
+          return [{ ...truck, progress: Math.max(0, next) }];
         }),
       );
     }, settings.simulationIntervalMs);
@@ -970,6 +1018,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [optimizeRouteWithScope],
   );
 
+  const startDriverTracking = useCallback(
+    (truckName: string, position: LatLng, simulated: boolean) => {
+      const activeIds = new Set(fleet.map((truck) => truck.id));
+      if (driverTracking) activeIds.add(driverTracking.truckId);
+      let sequence = 1;
+      while (activeIds.has(`TRK-${String(sequence).padStart(2, '0')}`)) sequence += 1;
+      const truckId = `TRK-${String(sequence).padStart(2, '0')}`;
+      const tracking = { truckId, truckName, position, progress: 0, simulated, startedAt: Date.now() };
+      driverTrackingRef.current = tracking;
+      setDriverTracking(tracking);
+      publishTrackingUpdate(tracking, 'POST');
+      notify(`${truckId} navigation started. Live dashboard tracking is active.`, 'success');
+      return truckId;
+    },
+    [fleet, driverTracking, notify],
+  );
+  const updateDriverTracking = useCallback(
+    (position: LatLng, nextProgress: number, simulated: boolean, accuracyMeters?: number) => {
+      const current = driverTrackingRef.current;
+      if (!current) return;
+      const tracking = {
+        ...current,
+        position,
+        progress: Math.min(1, Math.max(current.progress, nextProgress)),
+        simulated,
+        accuracyMeters: simulated ? undefined : accuracyMeters,
+        updatedAt: Date.now(),
+      };
+      driverTrackingRef.current = tracking;
+      setDriverTracking(tracking);
+      publishTrackingUpdate(tracking, 'POST');
+    },
+    [],
+  );
+  const stopDriverTracking = useCallback(() => {
+    driverTrackingRef.current = null;
+    setDriverTracking(null);
+    publishTrackingUpdate(null, 'DELETE');
+  }, []);
+
   const setActivePlanId = useCallback((id: RoutePlanId) => {
     setActivePlanIdState(id);
     setSelectedTruckId(null);
@@ -1128,6 +1216,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     retryRouting,
     optimizeRoute,
     optimizeRouteForStops,
+    driverTracking,
+    startDriverTracking,
+    updateDriverTracking,
+    stopDriverTracking,
+    trackingConnected,
     simulationStatus,
     progress,
     startRoute,

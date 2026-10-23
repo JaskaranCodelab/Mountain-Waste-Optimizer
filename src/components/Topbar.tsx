@@ -62,7 +62,7 @@ function formatClock(date: Date): { dateLabel: string; timeLabel: string } {
 }
 
 export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriverLogin: () => void }) {
-  const { view, simulationStatus, routing } = useApp();
+  const { view, simulationStatus, routing, fleet, driverTracking } = useApp();
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -138,7 +138,7 @@ export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriver
 
           <div className="hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 md:flex">
             <Truck className="h-3.5 w-3.5 text-forest-600" />
-            2 trucks • Active
+            {fleet.length + (driverTracking ? 1 : 0)} trucks • Active
             <span
               className={cn(
                 'ml-0.5 h-1.5 w-1.5 rounded-full',

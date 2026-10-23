@@ -26,6 +26,8 @@ export function OverviewPage() {
     stops,
     setView,
     optimizeRoute,
+    fleet,
+    driverTracking,
   } = useApp();
 
   return (
@@ -108,7 +110,7 @@ export function OverviewPage() {
                   Mussoorie collection map
                 </h3>
                 <p className="text-[10px] text-slate-400">
-                   Two simulated trucks, Mussoorie pickups and both route
+                  {fleet.length + (driverTracking ? 1 : 0)} active trucks, Mussoorie pickups and both route
                   scenarios • drag and zoom to explore
                 </p>
               </div>
