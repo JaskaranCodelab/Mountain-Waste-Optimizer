@@ -93,6 +93,7 @@ interface AppContextValue {
   revealRoute: (id: RoutePlanId) => void;
   retryRouting: () => void;
   optimizeRoute: () => void;
+  optimizeRouteForStops: (stopIds: string[]) => void;
   simulationStatus: SimulationStatus;
   progress: number;
   fleet: import('../types').FleetTruck[];
@@ -306,6 +307,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const [routingNonce, setRoutingNonce] = useState(0);
   const [optimizeVersion, setOptimizeVersion] = useState(0);
+  const [routeScopeIds, setRouteScopeIds] = useState<string[] | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [userLocation, setUserLocation] = useState<LatLng | null>(null);
@@ -368,7 +370,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const routingSignature = useMemo(
     () =>
-      stops
+      stops.filter((stop) => !routeScopeIds || routeScopeIds.includes(stop.id))
         .map((stop) =>
           [
             stop.id,
@@ -380,11 +382,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ].join(':'),
         )
         .join('|'),
-    [stops],
+    [stops, routeScopeIds],
+  );
+
+  const routeStops = useMemo(
+    () => stops.filter((stop) => !routeScopeIds || routeScopeIds.includes(stop.id)),
+    [stops, routeScopeIds],
   );
 
   const optimization = useMemo(
-    () => optimizeRoutes(stops, settings, DEPOT),
+    () => optimizeRoutes(routeStops, settings, DEPOT),
     [routingSignature, settings, optimizeVersion],
   );
 
@@ -941,7 +948,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notify('Retrying road routing…', 'info');
   }, [notify]);
 
-  const optimizeRoute = useCallback(() => {
+  const optimizeRouteWithScope = useCallback((stopIds?: string[]) => {
+    setRouteScopeIds(stopIds?.length ? stopIds : null);
     setOptimizeVersion((previous) => previous + 1);
     setActivePlanIdState('optimized');
     setSelectedTruckId(null);
@@ -956,6 +964,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       'success',
     );
   }, [resetAllPending, notify]);
+  const optimizeRoute = useCallback(() => optimizeRouteWithScope(), [optimizeRouteWithScope]);
+  const optimizeRouteForStops = useCallback(
+    (stopIds: string[]) => optimizeRouteWithScope(stopIds),
+    [optimizeRouteWithScope],
+  );
 
   const setActivePlanId = useCallback((id: RoutePlanId) => {
     setActivePlanIdState(id);
@@ -1114,6 +1127,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     fleetStatus: simulationStatus,
     retryRouting,
     optimizeRoute,
+    optimizeRouteForStops,
     simulationStatus,
     progress,
     startRoute,

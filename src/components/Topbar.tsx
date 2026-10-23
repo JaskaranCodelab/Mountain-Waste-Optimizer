@@ -7,6 +7,7 @@ import {
   PauseCircle,
   PlayCircle,
   Truck,
+  LogIn,
 } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import type { ViewId } from '../types';
@@ -60,7 +61,7 @@ function formatClock(date: Date): { dateLabel: string; timeLabel: string } {
   return { dateLabel, timeLabel };
 }
 
-export function Topbar({ onMenu }: { onMenu: () => void }) {
+export function Topbar({ onMenu, onDriverLogin }: { onMenu: () => void; onDriverLogin: () => void }) {
   const { view, simulationStatus, routing } = useApp();
   const [now, setNow] = useState(() => new Date());
 
@@ -124,6 +125,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <button type="button" onClick={onDriverLogin} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-forest-700 px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-forest-800 sm:px-3.5 sm:text-xs">
+            <LogIn className="h-3.5 w-3.5" /> Driver Login
+          </button>
           <div className="hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 xl:flex">
             <MapPin className="h-3.5 w-3.5 text-forest-600" />
             Uttarakhand, India

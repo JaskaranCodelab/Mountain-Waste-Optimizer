@@ -10,6 +10,7 @@ import { RouteComparisonPage } from './pages/RouteComparisonPage';
 import { PickupStopsPage } from './pages/PickupStopsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { DriverPortal } from './pages/DriverPortal';
 
 function CurrentPage() {
   const { view } = useApp();
@@ -35,6 +36,7 @@ function CurrentPage() {
 function AppShell() {
   const { view } = useApp();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [driverOpen, setDriverOpen] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -53,7 +55,7 @@ function AppShell() {
       ) : null}
 
       <div className="flex min-h-screen flex-col lg:pl-[272px]">
-        <Topbar onMenu={() => setSidebarOpen(true)} />
+        <Topbar onMenu={() => setSidebarOpen(true)} onDriverLogin={() => setDriverOpen(true)} />
         <main className="flex-1 px-4 py-5 sm:px-6 xl:px-8">
           <div className="mx-auto w-full max-w-[1500px]">
             <CurrentPage />
@@ -77,6 +79,7 @@ function AppShell() {
       </div>
 
       <Toast />
+      {driverOpen ? <DriverPortal onClose={() => setDriverOpen(false)} /> : null}
     </div>
   );
 }

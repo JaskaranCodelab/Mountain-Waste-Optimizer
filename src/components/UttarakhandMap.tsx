@@ -217,10 +217,12 @@ export function UttarakhandMap({
   heightClass = 'h-[520px]',
   showTruck = true,
   planId,
+  stopIds,
 }: {
   heightClass?: string;
   showTruck?: boolean;
   planId?: RoutePlanId;
+  stopIds?: string[];
 }) {
   const {
     stops,
@@ -240,6 +242,10 @@ export function UttarakhandMap({
     completedCount,
     notify,
   } = useApp();
+  const visibleStops = useMemo(
+    () => (stopIds ? stops.filter((stop) => stopIds.includes(stop.id)) : stops),
+    [stops, stopIds?.join('|')],
+  );
   const activePlan = plans[planId ?? activePlanId];
   const [showBaseline, setShowBaseline] = useState(() => !planId);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -277,8 +283,8 @@ export function UttarakhandMap({
     }
   }
 
-  const selectedStop = stops.find((stop) => stop.id === selectedStopId) ?? null;
-  const routeOrder = activePlan?.stopOrder ?? stops.map((stop) => stop.id);
+  const selectedStop = visibleStops.find((stop) => stop.id === selectedStopId) ?? null;
+  const routeOrder = activePlan?.stopOrder ?? visibleStops.map((stop) => stop.id);
   const sequenceById = useMemo(() => {
     const map = new Map<string, number>();
     routeOrder.forEach((id, index) => map.set(id, index + 1));
@@ -287,7 +293,7 @@ export function UttarakhandMap({
 
   const icons = useMemo(() => {
     const map = new Map<string, L.DivIcon>();
-    stops.forEach((stop, index) => {
+    visibleStops.forEach((stop, index) => {
       map.set(
         stop.id,
         stopIcon(
@@ -298,15 +304,15 @@ export function UttarakhandMap({
       );
     });
     return map;
-  }, [stops, selectedStopId, sequenceById]);
+  }, [visibleStops, selectedStopId, sequenceById]);
 
-  const fitPointsKey = stops
+  const fitPointsKey = visibleStops
     .map((stop) => `${stop.id}:${stop.lat}:${stop.lng}`)
     .join('|');
   const fitPoints = useMemo<LatLng[]>(
     () => [
       { lat: DEPOT.lat, lng: DEPOT.lng },
-      ...stops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
+      ...visibleStops.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
     ],
     [fitPointsKey],
   );
@@ -523,7 +529,7 @@ export function UttarakhandMap({
           );
         })()}
 
-        {stops.map((stop) => (
+        {visibleStops.map((stop) => (
           <Marker
             key={stop.id}
             position={[stop.lat, stop.lng]}
