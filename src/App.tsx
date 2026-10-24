@@ -78,7 +78,7 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/70">
+    <div className="min-h-screen bg-transparent">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       {sidebarOpen ? (
         <div
@@ -95,7 +95,7 @@ function AppShell() {
             <CurrentPage />
           </div>
         </main>
-        <footer className="mt-2 border-t border-slate-200 bg-white/60 px-4 py-4 sm:px-6 xl:px-8">
+        <footer className="mt-2 border-t border-white/60 bg-white/35 px-4 py-4 backdrop-blur-xl sm:px-6 xl:px-8">
           <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-1.5 text-[10px] leading-4 text-slate-400 sm:flex-row sm:items-center sm:justify-between">
             <p>
               <span className="font-semibold text-slate-500">

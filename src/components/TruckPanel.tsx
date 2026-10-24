@@ -109,7 +109,7 @@ export function TruckPanel() {
                 {focusTruck?.name ?? 'Collection fleet'}
               </p>
               <p className="text-[10px] text-forest-300">
-                {focusTruck?.id ?? '2 trucks'} •{' '}
+                {focusTruck?.id ?? (fleet.length ? `${fleet.length} trucks` : 'No active trucks')} •{' '}
                 {focusTruck?.type ?? 'Collection fleet'}
               </p>
               <p className="text-[10px] text-forest-300">

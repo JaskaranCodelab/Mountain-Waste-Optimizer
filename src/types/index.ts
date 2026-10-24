@@ -53,6 +53,10 @@ export interface Stop extends LatLng {
   area: string;
   wasteType: WasteType;
   quantityKg: number;
+  /** Demo visualization of the bin's fill level from 0 to 100 percent. */
+  fillPercent?: number;
+  /** Set only when a driver confirms the truck emptied this bin. */
+  emptiedByDriver?: boolean;
   priority: Priority;
   status: StopStatus;
   serviceTimeMin: number;

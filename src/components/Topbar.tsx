@@ -95,7 +95,7 @@ export function Topbar({ onMenu, onLogout }: { onMenu: () => void; onLogout: () 
   const routingLive = routing.source === 'osrm';
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
+    <header className="glass-topbar sticky top-0 z-30 border-b backdrop-blur-2xl">
       <div className="flex h-[72px] items-center gap-3 px-4 sm:px-6 xl:px-8">
         <button
           type="button"

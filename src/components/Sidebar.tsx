@@ -79,7 +79,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-50 flex w-[272px] flex-col overflow-hidden bg-forest-950 text-forest-100 shadow-2xl transition-transform duration-200 lg:translate-x-0',
+        'fixed inset-y-0 left-0 z-50 flex w-[272px] flex-col overflow-hidden border-r border-white/10 bg-forest-950/90 text-forest-100 shadow-2xl backdrop-blur-2xl transition-transform duration-200 lg:translate-x-0',
         open ? 'translate-x-0' : '-translate-x-full',
       )}
       aria-label="Primary navigation"

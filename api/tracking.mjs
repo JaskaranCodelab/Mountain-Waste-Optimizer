@@ -26,6 +26,7 @@ async function redis(config, ...command) {
 }
 
 function isValidTracking(value) {
+  const routeGeometry = value?.routeGeometry;
   return value &&
     typeof value.trackingKey === 'string' && value.trackingKey.length <= 100 &&
     typeof value.truckId === 'string' && value.truckId.length <= 40 &&
@@ -34,6 +35,10 @@ function isValidTracking(value) {
     Number.isFinite(value.position?.lng) && Math.abs(value.position.lng) <= 180 &&
     Number.isFinite(value.progress) && value.progress >= 0 && value.progress <= 1 &&
     typeof value.simulated === 'boolean' && Number.isFinite(value.startedAt) &&
+    (routeGeometry === undefined || (Array.isArray(routeGeometry) && routeGeometry.length <= 600 && routeGeometry.every((point) =>
+      Number.isFinite(point?.lat) && Math.abs(point.lat) <= 90 &&
+      Number.isFinite(point?.lng) && Math.abs(point.lng) <= 180))) &&
+    (value.sequence === undefined || (Number.isInteger(value.sequence) && value.sequence >= 0)) &&
     (value.accuracyMeters === undefined ||
       (Number.isFinite(value.accuracyMeters) && value.accuracyMeters >= 0));
 }
@@ -75,8 +80,39 @@ export default async function handler(request, response) {
     if (request.method === 'POST') {
       const value = typeof request.body === 'string' ? JSON.parse(request.body) : request.body;
       if (!isValidTracking(value)) return json(response, 400, { error: 'Invalid truck location update.' });
-      const tracking = { ...value, updatedAt: Date.now() };
-      const id = tracking.trackingKey;
+      const id = value.trackingKey;
+      const activeIds = await redis(config, 'SMEMBERS', ACTIVE_TRUCKS_KEY);
+      const supersededIds = [];
+      for (const activeId of activeIds || []) {
+        if (activeId === id) continue;
+        const activeValue = await redis(config, 'GET', `${TRUCK_KEY_PREFIX}${activeId}`);
+        if (!activeValue) continue;
+        let activeTracking;
+        try { activeTracking = JSON.parse(activeValue); } catch { continue; }
+        if (activeTracking.truckId !== value.truckId) continue;
+        if ((activeTracking.startedAt ?? 0) > value.startedAt) {
+          return json(response, 200, { ok: true, stale: true });
+        }
+        supersededIds.push(activeId);
+      }
+      for (const supersededId of supersededIds) {
+        await redis(config, 'DEL', `${TRUCK_KEY_PREFIX}${supersededId}`);
+        await redis(config, 'SREM', ACTIVE_TRUCKS_KEY, supersededId);
+      }
+      const existingValue = await redis(config, 'GET', `${TRUCK_KEY_PREFIX}${id}`);
+      let existing = null;
+      if (existingValue) {
+        try { existing = JSON.parse(existingValue); } catch { existing = null; }
+      }
+      if (existing && Number.isInteger(existing.sequence) && Number.isInteger(value.sequence) && value.sequence < existing.sequence) {
+        return json(response, 200, { ok: true, tracking: existing, stale: true });
+      }
+      const tracking = {
+        ...(existing && typeof existing === 'object' ? existing : {}),
+        ...value,
+        routeGeometry: value.routeGeometry ?? existing?.routeGeometry,
+        updatedAt: Date.now(),
+      };
       await redis(config, 'SET', `${TRUCK_KEY_PREFIX}${id}`, JSON.stringify(tracking), 'EX', LOCATION_TTL_SECONDS);
       await redis(config, 'SADD', ACTIVE_TRUCKS_KEY, id);
       return json(response, 200, { ok: true, tracking });

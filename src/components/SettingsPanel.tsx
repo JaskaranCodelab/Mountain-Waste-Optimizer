@@ -136,7 +136,7 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
+      <div className="glass-card flex flex-col gap-3 rounded-2xl border border-white/80 bg-white/65 p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-forest-700 text-white">

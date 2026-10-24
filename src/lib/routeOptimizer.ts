@@ -323,9 +323,26 @@ function evaluateOrder(
   };
 }
 
-function isBetterCandidate(a: RouteOrderPlan, b: RouteOrderPlan): boolean {
+function priorityInversions(plan: RouteOrderPlan, stopsById: Map<string, Stop>): number {
+  let inversions = 0;
+  for (let current = 0; current < plan.stopOrder.length; current += 1) {
+    const currentPriority = PRIORITY_VALUE[stopsById.get(plan.stopOrder[current])?.priority ?? 'low'];
+    for (let later = current + 1; later < plan.stopOrder.length; later += 1) {
+      const laterPriority = PRIORITY_VALUE[stopsById.get(plan.stopOrder[later])?.priority ?? 'low'];
+      if (currentPriority < laterPriority) inversions += laterPriority - currentPriority;
+    }
+  }
+  return inversions;
+}
+
+function isBetterCandidate(a: RouteOrderPlan, b: RouteOrderPlan, stopsById: Map<string, Stop>, prioritize: boolean): boolean {
   if (a.capacityFeasible !== b.capacityFeasible) {
     return a.capacityFeasible;
+  }
+  if (prioritize) {
+    const aPriorityPenalty = priorityInversions(a, stopsById);
+    const bPriorityPenalty = priorityInversions(b, stopsById);
+    if (aPriorityPenalty !== bPriorityPenalty) return aPriorityPenalty < bPriorityPenalty;
   }
   return a.estimatedDistanceKm < b.estimatedDistanceKm - 1e-7;
 }
@@ -397,7 +414,7 @@ export function optimizeRoutes(
 
   let optimized = candidates[0];
   for (let i = 1; i < candidates.length; i += 1) {
-    if (isBetterCandidate(candidates[i], optimized)) {
+    if (isBetterCandidate(candidates[i], optimized, stopsById, settings.priorityWeightPct > 0)) {
       optimized = candidates[i];
     }
   }

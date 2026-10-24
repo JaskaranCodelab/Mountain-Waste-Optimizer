@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MapContainer,
   Marker,
@@ -117,18 +117,24 @@ const USER_ICON = L.divIcon({
 });
 
 function stopIcon(stop: Stop, sequence: number, selected: boolean): L.DivIcon {
-  const completed = stop.status === 'Completed';
+  const completed = stop.emptiedByDriver === true;
+  // A completed pickup can still have recorded collected weight; reserve green for bins with zero remaining quantity.
+  const isEmpty = stop.quantityKg <= 0 || completed;
+  const fillPercent = isEmpty ? 0 : Math.max(0, Math.min(100, stop.fillPercent ?? (/full bin/i.test(stop.note) ? 100 : /partially filled/i.test(stop.note) ? 55 : 0)));
+  const fillHeight = 10 * fillPercent / 100;
+  const fillTop = 19 - fillHeight;
   const classes = [
     'stop-pin',
     `priority-${stop.priority}`,
     selected ? 'is-selected' : '',
     completed ? 'is-completed' : '',
+    isEmpty ? 'is-empty' : '',
   ]
     .filter(Boolean)
     .join(' ');
   return L.divIcon({
     className: 'himalaya-div-icon',
-    html: `<div class="${classes}"><svg class="stop-bin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span class="stop-seq">${sequence}</span>${
+    html: `<div class="${classes}" title="${isEmpty ? 'Empty bin' : `${fillPercent}% full`}" aria-label="${isEmpty ? 'Empty bin' : `${fillPercent}% full bin`}"><svg class="stop-bin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect class="bin-fill" x="7" y="${fillTop}" width="10" height="${fillHeight}" rx="1"/><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg><span class="stop-seq">${sequence}</span>${
       completed ? '<span class="stop-check">✓</span>' : ''
     }</div>`,
     iconSize: [34, 34],
@@ -226,11 +232,13 @@ export function UttarakhandMap({
   showTruck = true,
   planId,
   stopIds,
+  focusTruckId,
 }: {
   heightClass?: string;
   showTruck?: boolean;
   planId?: RoutePlanId;
   stopIds?: string[];
+  focusTruckId?: string;
 }) {
   const {
     stops,
@@ -252,7 +260,8 @@ export function UttarakhandMap({
     driverTrackings,
   } = useApp();
   const visibleStops = useMemo(
-    () => (stopIds ? stops.filter((stop) => stopIds.includes(stop.id)) : stops),
+    // Keep every stop visible on every map view; route lines still use only active route stops.
+    () => stops.filter((stop) => !stopIds || stopIds.includes(stop.id)),
     [stops, stopIds?.join('|')],
   );
   const activePlan = plans[planId ?? activePlanId];
@@ -414,7 +423,7 @@ export function UttarakhandMap({
     <div
       ref={mapShellRef}
       className={cn(
-        'relative w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-card',
+        'glass-map-frame relative w-full overflow-hidden rounded-2xl border border-white/80 bg-slate-100/70 shadow-card',
         isFullscreen ? 'h-screen rounded-none border-0' : heightClass,
       )}
     >
@@ -441,7 +450,20 @@ export function UttarakhandMap({
           selected={selectedStop}
         />
         <MapAutoResize />
-        {driverTrackings[0] ? <DriverMapFollow position={driverTrackings[0].position} /> : null}
+        {(() => {
+          const followedTruck = driverTrackings.find((truck) => truck.truckId === focusTruckId) ?? driverTrackings[0];
+          return followedTruck ? <DriverMapFollow position={followedTruck.position} /> : null;
+        })()}
+
+        {driverTrackings.map((driverTruck) => {
+          const geometry = driverTruck.routeGeometry;
+          if (!geometry || geometry.length < 2) return null;
+          const { covered, pending } = splitPolylineAtFraction(geometry, driverTruck.progress);
+          return <Fragment key={`driver-route-${driverTruck.trackingKey}`}>
+            {covered.length > 1 && <Polyline positions={covered} pathOptions={{ color: '#16a34a', weight: 5, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }} />}
+            {pending.length > 1 && <Polyline positions={pending} pathOptions={{ color: '#2563eb', weight: 4, opacity: 0.82, dashArray: '7 8', lineCap: 'round', lineJoin: 'round' }} />}
+          </Fragment>;
+        })}
 
         {showBaseline && otherPlan ? (
           <Polyline
@@ -569,6 +591,9 @@ export function UttarakhandMap({
                   <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>
                   <Badge tone="slate">
                     {WASTE_TYPE_META[stop.wasteType].shortLabel}
+                  </Badge>
+                  <Badge tone={stop.quantityKg <= 0 ? 'green' : stop.status === 'Completed' ? 'slate' : (stop.fillPercent ?? (/full bin/i.test(stop.note) ? 100 : /partially filled/i.test(stop.note) ? 55 : 0)) >= 100 ? 'red' : 'amber'}>
+                    {stop.quantityKg <= 0 ? 'Empty bin' : stop.status === 'Completed' ? 'Collected' : `${stop.fillPercent ?? (/full bin/i.test(stop.note) ? 100 : /partially filled/i.test(stop.note) ? 55 : 0)}% full`}
                   </Badge>
                 </div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">

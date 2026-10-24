@@ -51,6 +51,7 @@ const WASTE_MODES: WasteType[] = ['household', 'pine', 'fruit'];
 
 interface PersistedState {
   version: number;
+  demoFillVersion: number;
   stopSets: Record<WasteType, Stop[]>;
   settings: Settings;
   wasteMode: WasteType;
@@ -78,12 +79,27 @@ export interface DriverTracking {
   progress: number;
   simulated: boolean;
   startedAt: number;
+  capacityKg?: number;
   accuracyMeters?: number;
   updatedAt?: number;
+  routeGeometry?: LatLng[];
+  sequence?: number;
 }
 
-function publishTrackingUpdate(tracking: DriverTracking, method: 'POST' | 'DELETE') {
-  const body = method === 'POST' ? JSON.stringify(tracking) : undefined;
+export type DriverId = 'driver01' | 'driver02';
+export type DriverAssignments = Record<DriverId, string[]>;
+export type DriverAssignmentDetails = Record<DriverId, { area: string | null; truckId: string | null }>;
+const EMPTY_DRIVER_ASSIGNMENTS: DriverAssignments = { driver01: [], driver02: [] };
+const EMPTY_DRIVER_ASSIGNMENT_DETAILS: DriverAssignmentDetails = {
+  driver01: { area: null, truckId: null },
+  driver02: { area: null, truckId: null },
+};
+
+function publishTrackingUpdate(tracking: DriverTracking, method: 'POST' | 'DELETE', includeRouteGeometry = true) {
+  const { routeGeometry, ...location } = tracking;
+  const body = method === 'POST'
+    ? JSON.stringify(includeRouteGeometry ? tracking : location)
+    : undefined;
   const url = method === 'DELETE'
     ? trackingApiUrl(`/api/tracking?id=${encodeURIComponent(tracking.trackingKey)}`)
     : trackingApiUrl('/api/tracking');
@@ -107,7 +123,10 @@ interface AppContextValue {
   selectedStopId: string | null;
   selectStop: (id: string | null) => void;
   updateStops: (updater: Stop[] | ((prev: Stop[]) => Stop[])) => void;
-  updatePickupStatus: (stopId: string, status: StopStatus, note?: string) => void;
+  updatePickupStatus: (stopId: string, status: StopStatus, note?: string, quantityKg?: number, emptiedByDriver?: boolean) => void;
+  driverAssignments: DriverAssignments;
+  driverAssignmentDetails: DriverAssignmentDetails;
+  assignStopsToDriver: (driverId: DriverId, stopIds: string[], details: { area: string; truckId: string }) => Promise<boolean>;
   upsertStop: (stop: Stop) => void;
   removeStop: (id: string) => void;
   resetDemoData: () => void;
@@ -125,7 +144,7 @@ interface AppContextValue {
   optimizeRouteForStops: (stopIds: string[]) => void;
   driverTracking: DriverTracking | null;
   driverTrackings: DriverTracking[];
-  startDriverTracking: (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string) => string;
+  startDriverTracking: (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string, capacityKg?: number, routeGeometry?: LatLng[]) => string;
   updateDriverTracking: (position: LatLng, progress: number, simulated: boolean, accuracyMeters?: number) => void;
   stopDriverTracking: () => void;
   trackingConnected: boolean;
@@ -215,6 +234,7 @@ function readPersistedState(): PersistedState | null {
       settings?: Partial<Settings>;
       wasteMode?: unknown;
       version?: number;
+      demoFillVersion?: number;
     };
     if (!parsed.stopSets) {
       return null;
@@ -226,7 +246,22 @@ function readPersistedState(): PersistedState | null {
         return fallback[mode];
       }
       const valid = value.filter(isStop);
-      return valid.length === value.length ? valid : fallback[mode];
+      const loaded = valid.length === value.length ? valid : fallback[mode];
+      if ((parsed.demoFillVersion ?? 0) >= 2) return loaded;
+      const freshDemoById = new Map(fallback[mode].map((stop) => [stop.id, stop]));
+      return loaded.map((stop) => {
+        if (!stop.note.includes('simulated demo record')) return stop;
+        const fresh = freshDemoById.get(stop.id);
+        if (!fresh) return stop;
+        const wasSeededEmpty = stop.quantityKg === 0 && /demo bin is empty/i.test(stop.note) && stop.emptiedByDriver !== true;
+        return {
+          ...stop,
+          quantityKg: wasSeededEmpty ? fresh.quantityKg : stop.status === 'Completed' ? stop.quantityKg : fresh.quantityKg,
+          fillPercent: wasSeededEmpty ? fresh.fillPercent : stop.fillPercent,
+          status: wasSeededEmpty ? 'Pending' : stop.status,
+          note: wasSeededEmpty ? stop.note.replace(/\s*[·-]?\s*demo bin is empty/i, '').trim() : stop.note,
+        };
+      });
     };
     const mergedSettings = clampedSettings(parsed.settings ?? {}, DEFAULT_SETTINGS);
     if (parsed.settings?.routingProvider === 'simulated') {
@@ -236,6 +271,7 @@ function readPersistedState(): PersistedState | null {
     }
     return {
       version: 5,
+      demoFillVersion: 2,
       stopSets: {
         household: selectStops('household'),
         pine: selectStops('pine'),
@@ -346,6 +382,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [fitRequest, setFitRequest] = useState(0);
   const [driverTracking, setDriverTracking] = useState<DriverTracking | null>(null);
   const [driverTrackings, setDriverTrackings] = useState<DriverTracking[]>([]);
+  const [driverAssignmentsByMode, setDriverAssignmentsByMode] = useState<Record<WasteType, DriverAssignments>>({ household: EMPTY_DRIVER_ASSIGNMENTS, pine: EMPTY_DRIVER_ASSIGNMENTS, fruit: EMPTY_DRIVER_ASSIGNMENTS });
+  const [driverAssignmentDetailsByMode, setDriverAssignmentDetailsByMode] = useState<Record<WasteType, DriverAssignmentDetails>>({ household: EMPTY_DRIVER_ASSIGNMENT_DETAILS, pine: EMPTY_DRIVER_ASSIGNMENT_DETAILS, fruit: EMPTY_DRIVER_ASSIGNMENT_DETAILS });
   const driverTrackingRef = useRef<DriverTracking | null>(driverTracking);
   const [trackingConnected, setTrackingConnected] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -376,25 +414,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [wasteMode],
   );
 
-  const updatePickupStatus = useCallback((stopId: string, status: StopStatus, note?: string) => {
-    const stop = stopSets[wasteMode].find((item) => item.id === stopId);
-    const nextNote = note ?? stop?.note ?? '';
-    updateStops((previous) => previous.map((item) => item.id === stopId
-      ? { ...item, status, note: nextNote }
-      : item));
-    void fetch(trackingApiUrl('/api/pickup-status'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ wasteMode, stopId, status, note: nextNote }),
-    }).catch(() => undefined);
-  }, [stopSets, wasteMode, updateStops]);
-
   const notify = useCallback(
     (message: string, tone: Notice['tone'] = 'info') => {
       setNotice({ id: Date.now(), message, tone });
     },
     [],
   );
+
+  const updatePickupStatus = useCallback((stopId: string, status: StopStatus, note?: string, quantityKg?: number, emptiedByDriver?: boolean) => {
+    const stop = stopSets[wasteMode].find((item) => item.id === stopId);
+    const nextNote = note ?? stop?.note ?? '';
+    updateStops((previous) => previous.map((item) => item.id === stopId
+      ? { ...item, status, note: nextNote, ...(quantityKg === undefined ? {} : { quantityKg }), ...(emptiedByDriver === undefined ? {} : { emptiedByDriver }) }
+      : item));
+    void fetch(trackingApiUrl('/api/pickup-status'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ wasteMode, stopId, status, note: nextNote, ...(quantityKg === undefined ? {} : { quantityKg }), ...(emptiedByDriver === undefined ? {} : { emptiedByDriver }) }),
+    }).then((response) => {
+      if (!response.ok) notify('Pickup saved on this device, but shared sync failed. Check the tracking server or shared storage.', 'error');
+    }).catch(() => notify('Pickup saved on this device, but shared sync failed. Check your network and tracking server.', 'error'));
+  }, [stopSets, wasteMode, updateStops, notify]);
+
+  const assignStopsToDriver = useCallback((driverId: DriverId, stopIds: string[], details: { area: string; truckId: string }) => {
+    const otherDriver: DriverId = driverId === 'driver01' ? 'driver02' : 'driver01';
+    const keptOther = driverAssignmentsByMode[wasteMode][otherDriver].filter((id) => !stopIds.includes(id));
+    const currentMode = { ...driverAssignmentsByMode[wasteMode], [driverId]: [...new Set(stopIds)], [otherDriver]: keptOther };
+    const currentDetails = {
+      ...driverAssignmentDetailsByMode[wasteMode],
+      [driverId]: { area: details.area, truckId: details.truckId },
+      [otherDriver]: keptOther.length ? driverAssignmentDetailsByMode[wasteMode][otherDriver] : { area: null, truckId: null },
+    };
+    setDriverAssignmentsByMode((previous) => ({ ...previous, [wasteMode]: currentMode }));
+    setDriverAssignmentDetailsByMode((previous) => ({ ...previous, [wasteMode]: currentDetails }));
+    return fetch(trackingApiUrl('/api/pickup-status'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'assignments', wasteMode, assignments: currentMode, assignmentDetails: currentDetails }),
+    }).then((response) => response.ok).catch(() => false);
+  }, [driverAssignmentsByMode, driverAssignmentDetailsByMode, wasteMode]);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
@@ -415,11 +472,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const result = await response.json() as { trucks?: DriverTracking[] };
         if (!active) return;
         const trucks = Array.isArray(result.trucks) ? result.trucks : [];
-        setDriverTrackings(trucks);
         const ownTracking = driverTrackingRef.current;
+        const latest = ownTracking && trucks.find((truck) => truck.trackingKey === ownTracking.trackingKey);
+        const localStillFresh = ownTracking && Date.now() - (ownTracking.updatedAt ?? ownTracking.startedAt) < 90_000;
+        const synchronized = latest
+          ? [...trucks.filter((truck) => truck.trackingKey !== latest.trackingKey), latest]
+          : localStillFresh
+            ? [...trucks.filter((truck) => truck.trackingKey !== ownTracking.trackingKey), ownTracking]
+            : trucks;
+        setDriverTrackings(synchronized);
         if (ownTracking) {
-          const latest = trucks.find((truck) => truck.trackingKey === ownTracking.trackingKey);
-          if (latest) setDriverTracking(latest);
+          if (latest) {
+            driverTrackingRef.current = latest;
+            setDriverTracking(latest);
+          }
         }
         setTrackingConnected(true);
       } catch {
@@ -438,17 +504,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const response = await fetch(trackingApiUrl('/api/pickup-status'), { cache: 'no-store' });
         if (!response.ok) return;
         const result = await response.json() as { statuses?: Record<string, unknown> };
+        const remoteAssignments = (result as { assignments?: Partial<Record<WasteType, Partial<DriverAssignments>>> }).assignments;
+        const remoteAssignmentDetails = (result as { assignmentDetails?: Partial<Record<WasteType, Partial<DriverAssignmentDetails>>> }).assignmentDetails;
         if (!active || !result.statuses) return;
-        const remoteByMode = new Map<WasteType, Map<string, { status: StopStatus; note?: string }>>();
+        if (remoteAssignments) {
+          setDriverAssignmentsByMode((previous) => {
+            const next = { ...previous };
+            WASTE_MODES.forEach((mode) => {
+              const item = remoteAssignments[mode];
+              if (!item) return;
+              next[mode] = {
+                driver01: Array.isArray(item.driver01) ? item.driver01.filter((id): id is string => typeof id === 'string') : [],
+                driver02: Array.isArray(item.driver02) ? item.driver02.filter((id): id is string => typeof id === 'string') : [],
+              };
+            });
+            return next;
+          });
+        }
+        if (remoteAssignmentDetails) {
+          setDriverAssignmentDetailsByMode((previous) => {
+            const next = { ...previous };
+            WASTE_MODES.forEach((mode) => {
+              const item = remoteAssignmentDetails[mode];
+              if (!item) return;
+              next[mode] = {
+                driver01: {
+                  area: typeof item.driver01?.area === 'string' ? item.driver01.area : null,
+                  truckId: typeof item.driver01?.truckId === 'string' ? item.driver01.truckId : null,
+                },
+                driver02: {
+                  area: typeof item.driver02?.area === 'string' ? item.driver02.area : null,
+                  truckId: typeof item.driver02?.truckId === 'string' ? item.driver02.truckId : null,
+                },
+              };
+            });
+            return next;
+          });
+        }
+        const remoteByMode = new Map<WasteType, Map<string, { status: StopStatus; note?: string; quantityKg?: number; emptiedByDriver?: boolean }>>();
         WASTE_MODES.forEach((mode) => {
           const raw = result.statuses?.[mode];
           const records = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw) : [];
-          const remoteStops = new Map<string, { status: StopStatus; note?: string }>();
+          const remoteStops = new Map<string, { status: StopStatus; note?: string; quantityKg?: number; emptiedByDriver?: boolean }>();
           records.forEach((record) => {
             if (!record || typeof record !== 'object') return;
-            const item = record as { id?: unknown; status?: unknown; note?: unknown };
+            const item = record as { id?: unknown; status?: unknown; note?: unknown; quantityKg?: unknown; emptiedByDriver?: unknown };
             if (typeof item.id === 'string' && ['Pending', 'In Progress', 'Completed'].includes(String(item.status))) {
-              remoteStops.set(item.id, { status: item.status as StopStatus, note: typeof item.note === 'string' ? item.note : undefined });
+              const note = typeof item.note === 'string' ? item.note : undefined;
+              const wasReportedEmpty = /bin already empty/i.test(note ?? '');
+              remoteStops.set(item.id, {
+                status: wasReportedEmpty ? 'Completed' : item.status as StopStatus,
+                note,
+                quantityKg: wasReportedEmpty ? 0 : typeof item.quantityKg === 'number' && Number.isFinite(item.quantityKg) && item.quantityKg >= 0 ? item.quantityKg : undefined,
+                emptiedByDriver: typeof item.emptiedByDriver === 'boolean' ? item.emptiedByDriver : undefined,
+              });
             }
           });
           remoteByMode.set(mode, remoteStops);
@@ -461,9 +570,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (!remoteStops?.size) return;
             next[mode] = previous[mode].map((stop) => {
               const remote = remoteStops.get(stop.id);
-              if (!remote || (stop.status === remote.status && (remote.note === undefined || stop.note === remote.note))) return stop;
+              if (!remote || (stop.status === remote.status && (remote.note === undefined || stop.note === remote.note) && (remote.quantityKg === undefined || stop.quantityKg === remote.quantityKg) && (remote.emptiedByDriver === undefined || stop.emptiedByDriver === remote.emptiedByDriver))) return stop;
               changed = true;
-              return { ...stop, status: remote.status, ...(remote.note === undefined ? {} : { note: remote.note }) };
+              return { ...stop, status: remote.status, ...(remote.note === undefined ? {} : { note: remote.note }), ...(remote.quantityKg === undefined ? {} : { quantityKg: remote.quantityKg }), ...(remote.emptiedByDriver === undefined ? {} : { emptiedByDriver: remote.emptiedByDriver }) };
             });
           });
           return changed ? next : previous;
@@ -484,6 +593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const payload: PersistedState = {
       version: 5,
+      demoFillVersion: 2,
       stopSets,
       settings,
       wasteMode,
@@ -497,7 +607,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const routingSignature = useMemo(
     () =>
-      stops.filter((stop) => !routeScopeIds || routeScopeIds.includes(stop.id))
+      stops.filter((stop) => stop.quantityKg > 0 && stop.emptiedByDriver !== true && (!routeScopeIds || routeScopeIds.includes(stop.id)))
         .map((stop) =>
           [
             stop.id,
@@ -513,7 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const routeStops = useMemo(
-    () => stops.filter((stop) => !routeScopeIds || routeScopeIds.includes(stop.id)),
+    () => stops.filter((stop) => stop.quantityKg > 0 && stop.emptiedByDriver !== true && (!routeScopeIds || routeScopeIds.includes(stop.id))),
     [stops, routeScopeIds],
   );
 
@@ -540,69 +650,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       previousOrderKey.current = key;
       setProgress(0);
       setSimulationStatus('idle');
-      updateStops((previous) =>
-        previous.some((stop) => stop.status !== 'Pending')
-          ? previous.map((stop) => ({ ...stop, status: 'Pending' }))
-          : previous,
-      );
     }
-  }, [wasteMode, orderingKey, updateStops]);
+  }, [wasteMode, orderingKey]);
 
   const activePlan = plans[activePlanId];
 
   const [fleet, setFleet] = useState<FleetTruck[]>([]);
-
-  useEffect(() => {
-    if (!plans.baseline || !plans.optimized || fleet.length > 0) {
-      return;
-    }
-    const stopPool = stops.map((stop) => stop.id);
-    const shuffle = (arr: string[]) => {
-      const copy = [...arr];
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-      }
-      return copy;
-    };
-    const pool = shuffle(stopPool);
-    const assignments: string[][] = [[], []];
-    pool.forEach((id, idx) => {
-      assignments[idx % 2].push(id);
-    });
-    const seedTrucks: FleetTruck[] = [
-      {
-        id: 'TRK-01',
-        name: 'Small Truck',
-        type: 'Mini waste collection truck',
-        capacityKg: 500,
-        fuel: 'Diesel',
-        bestFor: 'Narrow roads, small markets, restricted-access areas',
-        planId: 'baseline',
-        progress: 0.08 + Math.random() * 0.12,
-        status: 'running',
-        speedPct: 0.03 + Math.random() * 0.04,
-        color: '#0ea5e9',
-        assignedStops: assignments[0],
-      },
-      {
-        id: 'TRK-02',
-        name: 'Large Truck',
-        type: 'Large waste collection truck',
-        capacityKg: 2000,
-        fuel: 'Diesel',
-        bestFor: 'Main roads, high-waste areas, bulk collection',
-        planId: 'optimized',
-        progress: 0.14 + Math.random() * 0.1,
-        status: 'running',
-        speedPct: 0.035 + Math.random() * 0.035,
-        color: '#22c55e',
-        assignedStops: assignments[1],
-      },
-    ];
-    setFleet(seedTrucks);
-    setSimulationStatus('running');
-  }, [plans.baseline, plans.optimized, fleet.length, stops]);
 
   useEffect(() => {
     if (simulationStatus !== 'running' || fleet.length === 0) {
@@ -943,8 +996,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resetAllPending = useCallback(() => {
     updateStops((previous) =>
-      previous.some((stop) => stop.status !== 'Pending')
-        ? previous.map((stop) => ({ ...stop, status: 'Pending' }))
+      previous.some((stop) => stop.quantityKg > 0 && stop.status === 'In Progress')
+        ? previous.map((stop) => stop.quantityKg > 0 && stop.status === 'In Progress' ? { ...stop, status: 'Pending' } : stop)
         : previous,
     );
   }, [updateStops]);
@@ -1080,7 +1133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActivePlanIdState('optimized');
     setSelectedTruckId(null);
     setProgress(0);
-    setSimulationStatus('running');
+    setSimulationStatus('idle');
     setFleet((previous) =>
       previous.map((truck) => ({ ...truck, status: 'running' })),
     );
@@ -1097,7 +1150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const startDriverTracking = useCallback(
-    (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string) => {
+    (truckName: string, position: LatLng, simulated: boolean, assignedTruckId?: string, capacityKg?: number, routeGeometry?: LatLng[]) => {
       const activeIds = new Set([
         ...fleet.map((truck) => truck.id),
         ...driverTrackings.map((truck) => truck.truckId),
@@ -1106,10 +1159,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       while (activeIds.has(`TRK-${String(sequence).padStart(2, '0')}`)) sequence += 1;
       const truckId = assignedTruckId ?? `TRK-${String(sequence).padStart(2, '0')}`;
       const trackingKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const tracking = { trackingKey, truckId, truckName, position, progress: 0, simulated, startedAt: Date.now() };
+      const tracking = { trackingKey, truckId, truckName, position, progress: 0, simulated, startedAt: Date.now(), sequence: 0, ...(capacityKg === undefined ? {} : { capacityKg }), ...(routeGeometry?.length ? { routeGeometry } : {}) };
       driverTrackingRef.current = tracking;
       setDriverTracking(tracking);
-      setDriverTrackings((previous) => [...previous.filter((truck) => truck.trackingKey !== trackingKey), tracking]);
+      setDriverTrackings((previous) => [...previous.filter((truck) => truck.trackingKey !== trackingKey && truck.truckId !== tracking.truckId), tracking]);
       publishTrackingUpdate(tracking, 'POST');
       notify(`${truckId} navigation started. Live dashboard tracking is active.`, 'success');
       return truckId;
@@ -1126,12 +1179,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         progress: Math.min(1, Math.max(current.progress, nextProgress)),
         simulated,
         accuracyMeters: simulated ? undefined : accuracyMeters,
+        sequence: (current.sequence ?? 0) + 1,
         updatedAt: Date.now(),
       };
       driverTrackingRef.current = tracking;
       setDriverTracking(tracking);
       setDriverTrackings((previous) => previous.map((truck) => truck.trackingKey === tracking.trackingKey ? tracking : truck));
-      publishTrackingUpdate(tracking, 'POST');
+      publishTrackingUpdate(tracking, 'POST', false);
     },
     [],
   );
@@ -1159,7 +1213,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedStopId(null);
       setSelectedTruckId(null);
       setProgress(0);
-      setSimulationStatus('running');
+      setSimulationStatus('idle');
       setFleet((previous) =>
         previous.map((truck) => ({ ...truck, status: 'running' })),
       );
@@ -1218,6 +1272,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetDemoData = useCallback(() => {
     const fresh = createInitialStopSets();
     setStopSets(fresh);
+    setDriverAssignmentsByMode({ household: EMPTY_DRIVER_ASSIGNMENTS, pine: EMPTY_DRIVER_ASSIGNMENTS, fruit: EMPTY_DRIVER_ASSIGNMENTS });
+    setDriverAssignmentDetailsByMode({ household: EMPTY_DRIVER_ASSIGNMENT_DETAILS, pine: EMPTY_DRIVER_ASSIGNMENT_DETAILS, fruit: EMPTY_DRIVER_ASSIGNMENT_DETAILS });
     setSettings({ ...DEFAULT_SETTINGS });
     setWasteMode('household');
     setSelectedStopId(null);
@@ -1232,10 +1288,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setOptimizeVersion((previous) => previous + 1);
     try {
       window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem('driver-handled-stops-driver01');
+      window.localStorage.removeItem('driver-handled-stops-driver02');
     } catch {
       setNotice(null);
     }
-    notify('Demo data and assumptions restored.', 'success');
+    void fetch(trackingApiUrl('/api/pickup-status'), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'reset-demo' }),
+    }).then((response) => {
+      if (!response.ok) throw new Error('Shared demo reset failed.');
+      notify('Demo data, shared pickup statuses, and driver assignments restored.', 'success');
+    }).catch(() => notify('This device was reset, but shared pickup statuses could not be cleared. Check the tracking server or shared storage.', 'error'));
   }, [notify]);
 
   const requestGeolocation = useCallback(() => {
@@ -1287,6 +1350,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     selectStop,
     updateStops,
     updatePickupStatus,
+    driverAssignments: driverAssignmentsByMode[wasteMode],
+    driverAssignmentDetails: driverAssignmentDetailsByMode[wasteMode],
+    assignStopsToDriver,
     upsertStop,
     removeStop,
     resetDemoData,

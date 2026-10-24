@@ -251,22 +251,40 @@ function roundToFive(value: number): number {
   return Math.max(10, Math.round(value / 5) * 5);
 }
 
+function stableFillValue(key: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
 export function createStopsForMode(mode: WasteType): Stop[] {
   const profile = MODE_PROFILES[mode];
-  return SEEDS.map((seed) => ({
-    id: seed.id,
-    name: seed.name,
-    area: seed.area,
-    lat: seed.lat,
-    lng: seed.lng,
-    wasteType: profile.typeOverrides[seed.id] ?? profile.defaultType,
-    quantityKg: roundToFive(seed.baseKg * (profile.multipliers[seed.id] ?? 1)),
-    priority: profile.priorities[seed.id] ?? seed.basePriority,
-    status: 'Pending',
-    serviceTimeMin: seed.serviceTimeMin,
-    accessibility: seed.accessibility,
-    note: `${seed.zone} • simulated demo record`,
-  }));
+  return SEEDS.map((seed) => {
+    const fill = stableFillValue(`${mode}:${seed.id}:fill`);
+    // Start every seeded stop with waste. A bin becomes empty only after a
+    // driver records a completed collection in the portal.
+    const isFull = fill < 0.35;
+    const expectedKg = seed.baseKg * (profile.multipliers[seed.id] ?? 1);
+    const quantityKg = roundToFive(expectedKg * (isFull ? 1 : 0.35 + stableFillValue(`${mode}:${seed.id}:amount`) * 0.45));
+    return {
+      id: seed.id,
+      name: seed.name,
+      area: seed.area,
+      lat: seed.lat,
+      lng: seed.lng,
+      wasteType: profile.typeOverrides[seed.id] ?? profile.defaultType,
+      quantityKg,
+      fillPercent: isFull ? 100 : Math.round(35 + stableFillValue(`${mode}:${seed.id}:amount`) * 45),
+      priority: profile.priorities[seed.id] ?? seed.basePriority,
+      status: 'Pending',
+      serviceTimeMin: seed.serviceTimeMin,
+      accessibility: seed.accessibility,
+      note: `${seed.zone} • simulated demo record${isFull ? ' · full bin' : ' · partially filled bin'}`,
+    };
+  });
 }
 
 export function createInitialStopSets(): Record<WasteType, Stop[]> {

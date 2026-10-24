@@ -1,6 +1,4 @@
-import {
-  ArrowUpRight,
-} from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useApp } from '../store/AppStore';
 import { AnalyticsCharts } from '../components/AnalyticsCharts';
 import { RouteComparison } from '../components/RouteComparison';

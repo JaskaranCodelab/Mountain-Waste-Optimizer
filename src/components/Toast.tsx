@@ -17,12 +17,12 @@ export function Toast() {
     <div className="fixed bottom-4 right-4 z-[1200] max-w-sm">
       <div
         className={cn(
-          'toast-enter flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-float backdrop-blur',
+          'glass-toast toast-enter flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-float',
           notice.tone === 'success'
-            ? 'border-emerald-200 bg-white text-emerald-800'
+            ? 'border-emerald-200/80 bg-emerald-50/80 text-emerald-800'
             : notice.tone === 'error'
-              ? 'border-red-200 bg-white text-red-700'
-              : 'border-slate-200 bg-white text-slate-700',
+              ? 'border-red-200/80 bg-red-50/85 text-red-700'
+              : 'border-slate-200/80 bg-white/75 text-slate-700',
         )}
         role="status"
       >

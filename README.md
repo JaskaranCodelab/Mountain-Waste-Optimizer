@@ -2,7 +2,7 @@
 
 **AI-assisted mountain waste collection & truck route optimizer for Uttarakhand**
 
-An interactive React dashboard that simulates 10 municipal waste pickups across Mussoorie, compares a plain nearest-neighbour route with a capacity-aware optimized route, tracks a slowly moving four-truck demo fleet, and estimates operating cost from transparent, configurable assumptions.
+An interactive React dashboard for simulated waste pickups across Mussoorie. It compares a plain nearest-neighbour route with a capacity-aware optimized route, supports separate admin and driver portals, shares driver pickup updates and active GPS positions through a tracking API, and estimates operating cost from transparent, configurable assumptions.
 
 ![Stack](https://img.shields.io/badge/React-18-149eca) ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178c6) ![Vite](https://img.shields.io/badge/Vite-5.4-646cff) ![Tailwind](https://img.shields.io/badge/Tailwind-3.4-38bdf8)
 
@@ -11,7 +11,7 @@ An interactive React dashboard that simulates 10 municipal waste pickups across 
 This is a demo application, not a live municipal service.
 
 - All pickup stops, quantities, priorities and statuses are **simulated demo records**.
-- The seeded fleet is simulated. A driver truck can publish device GPS to the shared tracking service; GPS requires browser permission and a secure HTTPS page. Without GPS, the driver route is clearly marked simulated.
+- No truck is shown as active until a driver starts navigation. Driver coordinates use device GPS when the browser grants permission on HTTPS; otherwise, the driver portal labels its route movement as simulated.
 - No live traffic, fuel-price or government collection feeds are connected.
 - The route optimizer is a **transparent heuristic**, not a trained machine-learning model.
 - Road geometry comes from public OpenStreetMap routing services where available (Valhalla first, OSRM fallback). If both are unavailable or rate-limited, the app falls back to clearly-labelled **simulated geometry**.
@@ -127,15 +127,12 @@ total           = fuelCost + maintenanceCost
 
 Defaults: 6 km/L, â‚¹96.72/L, â‚¹9/km, 1,500 kg capacity, 15% restricted-access penalty, 22% moderate-access penalty and 12% priority weighting. All values are editable in Settings and persisted locally.
 
-## Simulation
+## Route simulation and driver tracking
 
 - The baseline route is shown first; the optimized plan becomes active when **Optimize Route** is selected.
-- Four simulated trucks seed automatically when the app opens. They are assigned to the baseline or optimized geometry with independent starting positions, colours and slow random speeds.
-- Trucks advance every `simulationIntervalMs`; the **Step per tick** setting scales their speed. Movement continues while the app is open but is still a browser simulation, not live GPS.
-- Click a truck to show its own status, progress, covered stop count, next stop and route. The selected truck's covered route is drawn in **green** and its pending route in **blue**.
-- Controls: Start/Resume fleet, Pause fleet, Next Stop, Reset and Optimize Route.
-- Pickup statuses follow the focused fleet truck; completed and pending KPIs recalculate live.
-- The **Basline vs optimized route** page shows both plans on separate maps, with the trucks assigned to each plan.
+- Driver trucks appear on maps only after a driver starts navigation. Device GPS is used when available and permitted; otherwise, the driver portal labels its route movement as simulated.
+- Admin and driver maps refresh active driver positions from the tracking API. Shared multi-device tracking on Vercel requires the Upstash Redis environment variables described above.
+- The **Baseline vs optimized route** page continues to compare both route plans and their capacity-aware stop sequences.
 
 ## Persistence
 

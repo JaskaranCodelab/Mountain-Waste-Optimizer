@@ -105,7 +105,7 @@ export function RouteControls({ compact = false }: { compact?: boolean }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
           <Timer className="h-3 w-3" />
-          Live fleet • {fleet.length} trucks • random slow speeds
+          Live fleet • {fleet.length} trucks
         </div>
         <Button
           variant="ghost"

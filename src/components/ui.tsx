@@ -26,11 +26,11 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
     'bg-forest-700 text-white shadow-sm hover:bg-forest-800 focus-visible:ring-forest-500',
   secondary:
-    'border border-forest-200 bg-forest-50 text-forest-800 hover:bg-forest-100 focus-visible:ring-forest-400',
+    'border border-forest-200/80 bg-forest-50/75 text-forest-800 backdrop-blur-md hover:bg-forest-100/90 focus-visible:ring-forest-400',
   outline:
-    'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-400',
+    'border border-white/80 bg-white/60 text-slate-700 shadow-sm backdrop-blur-md hover:border-white hover:bg-white/85 focus-visible:ring-slate-400',
   ghost:
-    'text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400',
+    'text-slate-600 hover:bg-white/55 hover:text-slate-900 focus-visible:ring-slate-400',
   danger:
     'bg-red-600 text-white shadow-sm hover:bg-red-700 focus-visible:ring-red-400',
   amber:
@@ -83,7 +83,7 @@ export function Card({ className, children, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        'rounded-2xl border border-slate-200/90 bg-white shadow-card',
+        'glass-card rounded-2xl border border-white/80 bg-white/65 shadow-card',
         className,
       )}
       {...props}
@@ -177,10 +177,10 @@ export function SectionHeader({
 }
 
 export const inputClass =
-  'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-forest-400 focus:ring-2 focus:ring-forest-100';
+  'h-10 w-full rounded-xl border border-white/80 bg-white/65 px-3 text-sm text-slate-800 shadow-sm backdrop-blur-md outline-none transition placeholder:text-slate-400 focus:border-forest-400 focus:bg-white/90 focus:ring-2 focus:ring-forest-100';
 
 export const selectClass =
-  'h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-forest-400 focus:ring-2 focus:ring-forest-100';
+  'h-10 w-full appearance-none rounded-xl border border-white/80 bg-white/65 px-3 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-md outline-none transition focus:border-forest-400 focus:bg-white/90 focus:ring-2 focus:ring-forest-100';
 
 export function Field({
   label,
