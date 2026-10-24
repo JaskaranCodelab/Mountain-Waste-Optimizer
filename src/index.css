@@ -326,6 +326,18 @@ body {
   line-height: 1;
 }
 
+/* Fade-out animation for trucks returning to depot */
+.truck-pin-completing {
+  animation: truck-return-fadeout 2s ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes truck-return-fadeout {
+  0%   { opacity: 1;   transform: scale(1); }
+  40%  { opacity: 0.9; transform: scale(1.12); }
+  100% { opacity: 0;   transform: scale(0.4); }
+}
+
 .user-pin {
   height: 18px;
   width: 18px;
@@ -335,6 +347,75 @@ body {
   box-shadow:
     0 0 0 6px rgba(2, 132, 199, 0.18),
     0 4px 10px rgba(2, 132, 199, 0.45);
+}
+
+/* ── Depot marker ───────────────────────────────────────── */
+.depot-pin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 56px;
+  /* pointer events on the whole column */
+  cursor: pointer;
+}
+
+.depot-pin svg {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 44px;
+  width: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 3px solid #ffffff;
+  background: linear-gradient(145deg, #16412f, #1a5239);
+  color: #a7f3d0;
+  padding: 9px;
+  box-shadow:
+    0 0 0 4px rgba(22, 65, 47, 0.28),
+    0 12px 28px -8px rgba(9, 31, 24, 0.75);
+}
+
+.depot-ring {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 2.5px solid rgba(22, 65, 47, 0.5);
+  animation: depot-pulse 2.2s ease-out infinite;
+  pointer-events: none;
+}
+
+.depot-label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1.5px solid #ffffff;
+  background: #16412f;
+  color: #ffffff;
+  font-family: 'Sora', sans-serif;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  box-shadow: 0 2px 6px rgba(9, 31, 24, 0.55);
+  white-space: nowrap;
+}
+
+@keyframes depot-pulse {
+  0%   { transform: translateX(-50%) scale(0.92); opacity: 0.85; }
+  70%  { transform: translateX(-50%) scale(1.32); opacity: 0; }
+  100% { transform: translateX(-50%) scale(1.32); opacity: 0; }
 }
 
 .map-overlay {

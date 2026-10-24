@@ -19,7 +19,7 @@ export type RoutePlanId = 'baseline' | 'optimized';
 
 export type RoutingProvider = 'osrm' | 'simulated';
 
-export type SimulationStatus = 'idle' | 'running' | 'paused' | 'complete';
+export type SimulationStatus = 'idle' | 'running' | 'paused' | 'complete' | 'completing';
 
 export interface FleetTruck {
   id: string;

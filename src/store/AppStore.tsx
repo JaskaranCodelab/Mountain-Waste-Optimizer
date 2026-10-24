@@ -665,8 +665,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => {
       setFleet((prev) =>
         prev.flatMap((truck) => {
+          if (truck.status === 'completing') return [truck];
           const next = truck.progress + (truck.speedPct * stepScale) / 100;
-          if (next >= 1) return [];
+          if (next >= 1) {
+            // Truck reached depot — hold briefly so map can animate it out
+            return [{ ...truck, progress: 1, status: 'completing' }];
+          }
           return [{ ...truck, progress: Math.max(0, next) }];
         }),
       );
@@ -678,6 +682,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     settings.simulationIntervalMs,
     settings.simulationStepPct,
   ]);
+
+  // Remove trucks that have finished returning to depot after fade-out delay
+  const completingIds = fleet
+    .filter((t) => t.status === 'completing')
+    .map((t) => t.id)
+    .join(',');
+  useEffect(() => {
+    if (!completingIds) return;
+    const timer = window.setTimeout(() => {
+      setFleet((prev) => prev.filter((truck) => truck.status !== 'completing'));
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [completingIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1004,7 +1021,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startRoute = useCallback(() => {
     setFleet((prev) =>
-      prev.map((truck) => ({ ...truck, status: 'running' })),
+      prev
+        .filter((truck) => truck.status !== 'completing')
+        .map((truck) => ({ ...truck, status: 'running' })),
     );
     setSimulationStatus('running');
     notify('Real-time fleet tracking started.', 'success');
@@ -1012,14 +1031,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const pauseRoute = useCallback(() => {
     setFleet((prev) =>
-      prev.map((truck) => ({ ...truck, status: 'paused' })),
+      prev.map((truck) =>
+        truck.status === 'completing' ? truck : { ...truck, status: 'paused' },
+      ),
     );
     setSimulationStatus('paused');
   }, []);
 
   const resumeRoute = useCallback(() => {
     setFleet((prev) =>
-      prev.map((truck) => ({ ...truck, status: 'running' })),
+      prev.map((truck) =>
+        truck.status === 'completing' ? truck : { ...truck, status: 'running' },
+      ),
     );
     setSimulationStatus('running');
   }, []);

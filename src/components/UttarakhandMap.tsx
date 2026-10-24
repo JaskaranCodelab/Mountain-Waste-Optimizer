@@ -66,13 +66,15 @@ function fleetTruckIcon(
   id: string,
   color: string,
   capacityKg: number,
+  completing = false,
 ): L.DivIcon {
   const isLarge = capacityKg >= 1500;
   const size = isLarge ? 46 : 36;
   const glyph = isLarge ? 23 : 18;
+  const extraClass = completing ? ' truck-pin-completing' : '';
   return L.divIcon({
     className: 'himalaya-div-icon',
-    html: `<div class="truck-pin ${isLarge ? 'truck-pin-large' : 'truck-pin-small'}" style="--truck-accent:${color};--truck-ring:${color}33"><span class="truck-tag">${id.split('-')[1] ?? ''}</span><svg width="${glyph}" height="${glyph}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1"/><path d="M14 9h4l4 4v4a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M9 18h6"/></svg></div>`,
+    html: `<div class="truck-pin ${isLarge ? 'truck-pin-large' : 'truck-pin-small'}${extraClass}" style="--truck-accent:${color};--truck-ring:${color}33"><span class="truck-tag">${id.split('-')[1] ?? ''}</span><svg width="${glyph}" height="${glyph}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1"/><path d="M14 9h4l4 4v4a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M9 18h6"/></svg></div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
     popupAnchor: [0, isLarge ? -28 : -22],
@@ -114,6 +116,26 @@ const USER_ICON = L.divIcon({
   html: '<div class="user-pin"></div>',
   iconSize: [18, 18],
   iconAnchor: [9, 9],
+});
+
+const DEPOT_ICON = L.divIcon({
+  className: 'himalaya-div-icon',
+  html: `<div class="depot-pin" title="Mussoorie Collection Depot — trucks start and unload here">
+    <div class="depot-ring"></div>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 20v-9H2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2Z"/>
+      <path d="M18 11V4H6v7"/>
+      <path d="M10 11V9h4v2"/>
+      <path d="M2 11h20"/>
+      <path d="M12 20v-5"/>
+      <path d="M9 20v-3"/>
+      <path d="M15 20v-3"/>
+    </svg>
+    <span class="depot-label">DEPOT</span>
+  </div>`,
+  iconSize: [56, 60],
+  iconAnchor: [28, 56],
+  popupAnchor: [0, -58],
 });
 
 function stopIcon(stop: Stop, sequence: number, selected: boolean): L.DivIcon {
@@ -360,7 +382,11 @@ export function UttarakhandMap({
         if (!plan || plan.geometry.length < 2) {
           return [];
         }
-        const point = pointAtFraction(plan.geometry, truck.progress);
+        // Completing trucks snap to depot; others follow route geometry
+        const point =
+          truck.status === 'completing'
+            ? { lat: DEPOT.lat, lng: DEPOT.lng }
+            : pointAtFraction(plan.geometry, truck.progress);
         const total = plan.distanceKm > 0 ? plan.distanceKm : 1;
         const nextStopId =
           plan.stopOrder.find(
@@ -399,13 +425,13 @@ export function UttarakhandMap({
     fleet.forEach((truck) => {
       icons.set(
         truck.id,
-        fleetTruckIcon(truck.id, truck.color, truck.capacityKg),
+        fleetTruckIcon(truck.id, truck.color, truck.capacityKg, truck.status === 'completing'),
       );
     });
     return icons;
   }, [
     fleet
-      .map((truck) => `${truck.id}:${truck.color}:${truck.capacityKg}`)
+      .map((truck) => `${truck.id}:${truck.color}:${truck.capacityKg}:${truck.status === 'completing'}`)
       .join('|'),
   ]);
 
@@ -778,6 +804,33 @@ export function UttarakhandMap({
             </Popup>
           </Marker>
         ) : null}
+
+        {/* Depot marker — trucks start here and return to unload */}
+        <Marker
+          position={[DEPOT.lat, DEPOT.lng]}
+          icon={DEPOT_ICON}
+          zIndexOffset={2000}
+        >
+          <Popup>
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-forest-700">
+                🏭 Waste Collection Depot
+              </p>
+              <p className="font-display text-[13px] font-bold text-slate-900">
+                {DEPOT.name}
+              </p>
+              <p className="text-[10px] text-slate-500">{DEPOT.area}</p>
+              <div className="rounded-md bg-forest-50 px-2 py-1.5 text-[10px] leading-4 text-forest-800">
+                <span className="font-semibold">Depot functions:</span> All trucks
+                depart from here, return to unload collected waste, and stage for
+                the next collection run.
+              </div>
+              <p className="font-mono text-[9px] text-slate-400">
+                {DEPOT.lat.toFixed(5)}, {DEPOT.lng.toFixed(5)}
+              </p>
+            </div>
+          </Popup>
+        </Marker>
       </MapContainer>
 
       <div className="pointer-events-none absolute inset-0 z-[800]">

@@ -2,13 +2,10 @@ import {
   Apple,
   BarChart3,
   ChevronRight,
-  Columns2,
   House,
   LayoutDashboard,
-  Map,
   Mountain,
   PackageSearch,
-  Route,
   Settings2,
   TreePine,
   Truck,
@@ -29,14 +26,6 @@ const NAV_ITEMS: Array<{
   hint: string;
 }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, hint: 'Control centre' },
-  { id: 'map', label: 'Live Map', icon: Map, hint: 'Route map' },
-  { id: 'planner', label: 'Route Planner', icon: Route, hint: 'Optimizer' },
-  {
-    id: 'compare',
-    label: 'Basline vs optimized route',
-    icon: Columns2,
-    hint: 'Side-by-side maps',
-  },
   { id: 'stops', label: 'Pickup Stops', icon: PackageSearch, hint: '10 stops' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3, hint: 'Collection data' },
   { id: 'settings', label: 'Settings', icon: Settings2, hint: 'Assumptions' },
